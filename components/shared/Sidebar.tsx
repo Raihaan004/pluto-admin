@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { LayoutDashboard, Users, Shield, Settings, Activity } from "lucide-react"
+import { LayoutDashboard, Users, Shield, Settings, Activity, ClipboardList } from "lucide-react"
 import { UserButton } from "@clerk/nextjs"
 import { cn } from "@/lib/utils"
 
@@ -11,6 +11,7 @@ const menuItems = [
   { title: "Organizations", href: "/organizations", icon: Users },
   { title: "Licenses", href: "/licenses", icon: Shield },
   { title: "System Health", href: "/health", icon: Activity },
+  { title: "Global Logs", href: "/logs", icon: ClipboardList },
   { title: "Global Settings", href: "/settings", icon: Settings },
 ]
 

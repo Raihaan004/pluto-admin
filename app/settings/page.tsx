@@ -2,16 +2,27 @@
 
 import { Settings, Save, Bell, Shield, Key, Globe, Loader2 } from "lucide-react"
 import { useState } from "react"
+import { logAdminAction } from "@/lib/logger"
+import { useUser } from "@clerk/nextjs"
 
 export default function SettingsPage() {
+  const { user } = useUser()
   const [loading, setLoading] = useState(false)
 
-  const handleSave = () => {
+  const handleSave = async () => {
     setLoading(true)
-    setTimeout(() => {
-      setLoading(false)
-      alert("Settings saved successfully!")
-    }, 1000)
+    // Simulate save
+    await new Promise(resolve => setTimeout(resolve, 1000))
+    
+    await logAdminAction(
+      'UPDATE_SETTINGS',
+      'Updated global platform settings',
+      null,
+      user?.primaryEmailAddress?.emailAddress || user?.id || 'Unknown Admin'
+    )
+
+    setLoading(false)
+    alert("Settings saved successfully!")
   }
 
   return (

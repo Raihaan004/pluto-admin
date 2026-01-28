@@ -2,7 +2,12 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
 // We want to protect everything except the sign-in/sign-up pages if they exist
-const isPublicRoute = createRouteMatcher(["/sign-in(.*)", "/sign-up(.*)", "/"]);
+const isPublicRoute = createRouteMatcher([
+  "/sign-in(.*)", 
+  "/sign-up(.*)", 
+  "/", 
+  "/api/verify-license" // Allow external access to license verification
+]);
 
 export default clerkMiddleware(async (auth, req) => {
   const { userId } = await auth();

@@ -4,8 +4,10 @@ import { Search, ShieldCheck, ShieldAlert, ExternalLink, Plus, Mail, Building, C
 import Link from "next/link"
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { supabase } from "@/lib/supabase"
+import { supabase, mainSupabase } from "@/lib/supabase"
 import { createClerkOrganization, deleteClerkOrganization } from "@/app/actions/clerk"
+import { logAdminAction } from "@/lib/logger"
+import { useUser } from "@clerk/nextjs"
 
 interface Organization {
   id: number
@@ -19,6 +21,7 @@ interface Organization {
 }
 
 export default function OrganizationsPage() {
+  const { user } = useUser()
   const [organizations, setOrganizations] = useState<Organization[]>([])
   const [loading, setLoading] = useState(true)
   const [showCreateModal, setShowCreateModal] = useState(false)
@@ -119,6 +122,14 @@ export default function OrganizationsPage() {
 
       if (licenseError) throw licenseError
 
+      // Log the action
+      await logAdminAction(
+        'CREATE_ORGANIZATION',
+        `Created organization ${formData.name} with ${formData.plan} plan`,
+        orgData.id,
+        user?.primaryEmailAddress?.emailAddress || user?.id || 'Unknown Admin'
+      )
+
       alert(`Organization Onboarded Successfully!\n\nOrg Code: ${orgCode}\nLicense Key: ${licenseKey}`)
       setShowCreateModal(false)
       setStep(1)
@@ -149,6 +160,40 @@ export default function OrganizationsPage() {
         }
       }
 
+      // 1.5 Delete from Main Project Database (Clean up dedicated instance data)
+      try {
+        // Fetch all users of this org to clean up their data
+        const { data: orgUsers } = await mainSupabase
+          .from("users")
+          .select("clerk_id")
+          .eq("org_id", orgId);
+          
+        if (orgUsers && orgUsers.length > 0) {
+          const userIds = orgUsers.map(u => u.clerk_id);
+          
+          // Delete associated data
+          await mainSupabase.from("notifications").delete().in("user_id", userIds);
+          await mainSupabase.from("projects").delete().in("user_id", userIds);
+          await mainSupabase.from("processes").delete().in("user_id", userIds);
+        }
+
+        // Delete instance settings locally
+        await mainSupabase
+          .from("instance_settings")
+          .delete()
+          .eq("org_id", orgId);
+        
+        // Delete users belonging to this organization
+        await mainSupabase
+          .from("users")
+          .delete()
+          .eq("org_id", orgId);
+          
+        console.log(`Successfully purged data for organization ${orgId} from main database`);
+      } catch (mainDbError) {
+        console.warn("Main database cleanup encountered an issue:", mainDbError);
+      }
+
       // 2. Delete Licenses first (Foreign Key constraint)
       const { error: licenseError } = await supabase
         .from('licenses')
@@ -164,6 +209,14 @@ export default function OrganizationsPage() {
         .eq('id', orgId)
 
       if (orgError) throw orgError
+
+      // Log the action
+      await logAdminAction(
+        'DELETE_ORGANIZATION',
+        `Deleted organization ${orgName} (ID: ${orgId})`,
+        null,
+        user?.primaryEmailAddress?.emailAddress || user?.id || 'Unknown Admin'
+      )
 
       alert("Organization deleted successfully")
       fetchOrganizations()

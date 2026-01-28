@@ -4,8 +4,21 @@ import { ShieldCheck, ShieldAlert, CreditCard, Calendar, Activity, Users, Settin
 import Link from "next/link"
 import { useState, use, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { supabase } from "@/lib/supabase"
+import { supabase, mainSupabase } from "@/lib/supabase"
 import { deleteClerkOrganization } from "@/app/actions/clerk"
+import { logAdminAction } from "@/lib/logger"
+import { useUser } from "@clerk/nextjs"
+
+interface User {
+  clerk_id: string
+  first_name: string
+  last_name: string
+  email: string
+  image_url: string
+  role: string
+  approval_status: string
+  created_at: string
+}
 
 interface Organization {
   id: number
@@ -27,15 +40,49 @@ interface License {
 }
 
 export default function OrganizationDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { user } = useUser()
   const { id } = use(params)
   const router = useRouter()
   const [activeTab, setActiveTab] = useState("overview")
   const [org, setOrg] = useState<Organization | null>(null)
   const [license, setLicense] = useState<License | null>(null)
+  const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
   const [isUpdating, setIsUpdating] = useState(false)
   const [showPlanModal, setShowPlanModal] = useState(false)
+  const [showSuspendModal, setShowSuspendModal] = useState(false)
   const [newPlan, setNewPlan] = useState("")
+
+  const handleToggleStatus = async () => {
+    if (!org) return;
+    const newStatus = org.status === 'active' ? 'suspended' : 'active';
+    
+    try {
+      setIsUpdating(true);
+      const { error } = await supabase
+        .from('organizations')
+        .update({ status: newStatus })
+        .eq('id', id);
+
+      if (error) throw error;
+
+      await logAdminAction(
+        newStatus === 'suspended' ? 'SUSPEND_ORGANIZATION' : 'ACTIVATE_ORGANIZATION',
+        `${newStatus === 'suspended' ? 'Suspended' : 'Activated'} organization ${org.name}`,
+        parseInt(id),
+        user?.primaryEmailAddress?.emailAddress || user?.id || 'Unknown Admin'
+      );
+
+      setOrg({ ...org, status: newStatus });
+      setShowSuspendModal(false);
+      alert(`Organization ${newStatus === 'suspended' ? 'suspended' : 'activated'} successfully`);
+    } catch (error: any) {
+      console.error('Error toggling status:', error);
+      alert('Error: ' + error.message);
+    } finally {
+      setIsUpdating(false);
+    }
+  };
 
   const handleDelete = async () => {
     if (!org) return;
@@ -52,6 +99,40 @@ export default function OrganizationDetailPage({ params }: { params: Promise<{ i
         }
       }
 
+      // 1.5 Delete from Main Project Database (Clean up dedicated instance data)
+      try {
+        // Fetch all users of this org to clean up their data
+        const { data: orgUsers } = await mainSupabase
+          .from("users")
+          .select("clerk_id")
+          .eq("org_id", id);
+          
+        if (orgUsers && orgUsers.length > 0) {
+          const userIds = orgUsers.map(u => u.clerk_id);
+          
+          // Delete associated data
+          await mainSupabase.from("notifications").delete().in("user_id", userIds);
+          await mainSupabase.from("projects").delete().in("user_id", userIds);
+          await mainSupabase.from("processes").delete().in("user_id", userIds);
+        }
+
+        // Delete instance settings locally
+        await mainSupabase
+          .from("instance_settings")
+          .delete()
+          .eq("org_id", id);
+        
+        // Delete users belonging to this organization
+        await mainSupabase
+          .from("users")
+          .delete()
+          .eq("org_id", id);
+          
+        console.log(`Successfully purged data for organization ${id} from main database`);
+      } catch (mainDbError) {
+        console.warn("Main database cleanup encountered an issue, proceeding with administrator deletion:", mainDbError);
+      }
+
       // 2. Delete Supabase Org (Cascade should handle licenses)
       const { error } = await supabase
         .from("organizations")
@@ -59,6 +140,13 @@ export default function OrganizationDetailPage({ params }: { params: Promise<{ i
         .eq("id", id);
 
       if (error) throw error;
+
+      await logAdminAction(
+        'DELETE_ORGANIZATION',
+        `Deleted organization ${org.name} (ID: ${id})`,
+        null,
+        user?.primaryEmailAddress?.emailAddress || user?.id || 'Unknown Admin'
+      )
 
       toast.success("Organization deleted successfully");
       router.push("/organizations");
@@ -107,6 +195,13 @@ export default function OrganizationDetailPage({ params }: { params: Promise<{ i
 
       if (licError) throw licError;
 
+      await logAdminAction(
+        'UPDATE_PLAN',
+        `Changed plan for ${org?.name} to ${tier}`,
+        parseInt(id),
+        user?.primaryEmailAddress?.emailAddress || user?.id || 'Unknown Admin'
+      )
+
       toast.success(`Plan updated to ${tier}`);
       setOrg(prev => prev ? { ...prev, plan: tier } : null);
       setLicense(prev => prev ? { ...prev, max_users: maxUsers, expiry_date: expiryDate.toISOString().split("T")[0] } : null);
@@ -148,6 +243,17 @@ export default function OrganizationDetailPage({ params }: { params: Promise<{ i
 
       if (!licenseError) {
         setLicense(licenseData)
+      }
+
+      // Fetch Users from Main Project Database
+      const { data: userData, error: userError } = await mainSupabase
+        .from('users')
+        .select('*')
+        .eq('org_id', id.toString()) // Convert to string just in case
+        .order('created_at', { ascending: false })
+
+      if (!userError && userData) {
+        setUsers(userData)
       }
     } catch (error) {
       console.error('Error fetching data:', error)
@@ -216,7 +322,10 @@ export default function OrganizationDetailPage({ params }: { params: Promise<{ i
             <button className="flex items-center gap-2 px-4 py-2 border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-900 transition">
               <Edit className="h-4 w-4" /> Edit Info
             </button>
-            <button className={`${org.status === 'active' ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'} flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium hover:opacity-80 transition`}>
+            <button 
+              onClick={() => setShowSuspendModal(true)}
+              className={`${org.status === 'active' ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'} flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium hover:opacity-80 transition`}
+            >
               <Ban className="h-4 w-4" /> {org.status === 'active' ? 'Suspend' : 'Activate'}
             </button>
           </div>
@@ -225,7 +334,7 @@ export default function OrganizationDetailPage({ params }: { params: Promise<{ i
 
       {/* Tabs */}
       <div className="flex border-b border-zinc-200 dark:border-zinc-800 mb-8 space-x-8">
-        {["Overview", "License", "Features", "Monitoring"].map((tab) => (
+        {["Overview", "License", "Team", "Features", "Monitoring"].map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab.toLowerCase())}
@@ -250,6 +359,10 @@ export default function OrganizationDetailPage({ params }: { params: Promise<{ i
                   <Activity className="h-5 w-5 text-blue-600" /> Organization Info
                 </h3>
                 <div className="grid grid-cols-2 gap-y-6">
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-400 uppercase mb-1">Organization ID</label>
+                    <p className="font-mono font-medium text-purple-600">{org.id}</p>
+                  </div>
                   <div>
                     <label className="block text-xs font-bold text-zinc-400 uppercase mb-1">Org Code</label>
                     <p className="font-mono font-medium">{org.code}</p>
@@ -325,10 +438,10 @@ export default function OrganizationDetailPage({ params }: { params: Promise<{ i
                   <div className="space-y-4">
                     <div className="flex justify-between items-center text-sm">
                       <span className="text-zinc-500">User Seats</span>
-                      <span className="font-bold">0 / {license.max_users}</span>
+                      <span className="font-bold">{users.length} / {license.max_users}</span>
                     </div>
                     <div className="w-full bg-zinc-100 dark:bg-zinc-800 h-2 rounded-full overflow-hidden">
-                      <div className="bg-blue-600 h-full rounded-full" style={{ width: `0%` }} />
+                      <div className="bg-blue-600 h-full rounded-full" style={{ width: `${Math.min((users.length / license.max_users) * 100, 100)}%` }} />
                     </div>
                   </div>
                 </>
@@ -338,6 +451,61 @@ export default function OrganizationDetailPage({ params }: { params: Promise<{ i
                   <button className="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg text-xs font-bold">Issue License</button>
                 </div>
               )}
+            </div>
+          )}
+
+          {activeTab === "team" && (
+            <div className="bg-white dark:bg-zinc-900 p-6 rounded-xl border border-zinc-200 dark:border-zinc-800">
+               <div className="flex justify-between items-center mb-6">
+                <h3 className="text-lg font-bold flex items-center gap-2 text-zinc-900 dark:text-white">
+                  <Users className="h-5 w-5 text-blue-600" /> Organization Team
+                </h3>
+                <span className="px-3 py-1 bg-zinc-100 dark:bg-zinc-800 rounded-full text-xs font-bold text-zinc-600">
+                  {users.length} Total Users
+                </span>
+              </div>
+
+              <div className="space-y-3">
+                {users.length > 0 ? (
+                  users.map((user) => (
+                    <div key={user.clerk_id} className="flex items-center justify-between p-4 border border-zinc-100 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
+                      <div className="flex items-center gap-3">
+                        <div className="h-10 w-10 rounded-full overflow-hidden bg-zinc-200 border border-zinc-200">
+                          {user.image_url ? (
+                            <img src={user.image_url} alt="" className="h-full w-full object-cover" />
+                          ) : (
+                            <div className="h-full w-full flex items-center justify-center text-zinc-500 font-bold">
+                              {user.first_name?.[0]}{user.last_name?.[0]}
+                            </div>
+                          )}
+                        </div>
+                        <div>
+                          <p className="font-bold text-sm">{user.first_name} {user.last_name}</p>
+                          <p className="text-xs text-zinc-500">{user.email}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <div className="text-right sr-only md:not-sr-only">
+                          <p className="text-[10px] font-bold uppercase text-zinc-400">Joined</p>
+                          <p className="text-xs font-medium">{new Date(user.created_at).toLocaleDateString()}</p>
+                        </div>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                          user.role === 'admin' ? 'bg-red-50 text-red-600 border border-red-100' :
+                          user.role === 'editor' ? 'bg-blue-50 text-blue-600 border border-blue-100' :
+                          'bg-zinc-50 text-zinc-600 border border-zinc-100'
+                        }`}>
+                          {user.role}
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-center py-12 border-2 border-dashed border-zinc-100 dark:border-zinc-800 rounded-2xl">
+                    <Users className="h-12 w-12 text-zinc-200 mx-auto mb-4" />
+                    <p className="text-zinc-500 text-sm">No users have joined this organization yet.</p>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -432,6 +600,44 @@ export default function OrganizationDetailPage({ params }: { params: Promise<{ i
               >
                 Cancel
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Suspend Confirmation Modal */}
+      {showSuspendModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-6 text-center">
+              <div className={`mx-auto w-16 h-16 rounded-full flex items-center justify-center mb-4 ${org?.status === 'active' ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
+                {org?.status === 'active' ? <Ban className="h-8 w-8" /> : <ShieldCheck className="h-8 w-8" />}
+              </div>
+              <h3 className="text-xl font-bold mb-2">
+                {org?.status === 'active' ? 'Suspend Organization?' : 'Activate Organization?'}
+              </h3>
+              <p className="text-zinc-500 text-sm mb-6">
+                {org?.status === 'active' 
+                  ? `Are you sure you want to suspend access for ${org?.name}? This will block all users from accessing their dashboard immediately.`
+                  : `Are you sure you want to reactivate access for ${org?.name}?`}
+              </p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setShowSuspendModal(false)}
+                  className="flex-1 px-4 py-2 border border-zinc-200 dark:border-zinc-800 rounded-lg text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-900 transition"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleToggleStatus}
+                  disabled={isUpdating}
+                  className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium text-white transition ${
+                    org?.status === 'active' ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'
+                  }`}
+                >
+                  {isUpdating ? 'Processing...' : org?.status === 'active' ? 'Confirm Suspend' : 'Confirm Activate'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
