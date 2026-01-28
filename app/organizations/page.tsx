@@ -1,6 +1,6 @@
 "use client"
 
-import { Search, ShieldCheck, ShieldAlert, ExternalLink, Plus, Mail, Building, CreditCard, Calendar, Check, ArrowRight, ArrowLeft, Loader2, Trash2 } from "lucide-react"
+import { Search, ShieldCheck, ShieldAlert, ExternalLink, Plus, Mail, Building, CreditCard, Calendar, Check, ArrowRight, ArrowLeft, Loader2, Trash2, Download } from "lucide-react"
 import Link from "next/link"
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
@@ -8,6 +8,7 @@ import { supabase, mainSupabase } from "@/lib/supabase"
 import { createClerkOrganization, deleteClerkOrganization } from "@/app/actions/clerk"
 import { logAdminAction } from "@/lib/logger"
 import { useUser } from "@clerk/nextjs"
+import { jsPDF } from "jspdf"
 
 interface Organization {
   id: number
@@ -56,6 +57,104 @@ export default function OrganizationsPage() {
 
   const handleNext = () => setStep(step + 1)
   const handleBack = () => setStep(step - 1)
+
+  const handleDownloadActivationGuide = async (org: Organization) => {
+    try {
+      // 1. Fetch license details for this org
+      const { data: licenseData, error: licenseError } = await supabase
+        .from('licenses')
+        .select('license_key')
+        .eq('organization_id', org.id)
+        .eq('status', 'active')
+        .single()
+
+      if (licenseError) throw licenseError
+      if (!licenseData) throw new Error("No active license found for this organization")
+
+      const licenseKey = licenseData.license_key
+
+      // 2. Generate PDF
+      const doc = new jsPDF()
+      
+      // Styling
+      doc.setFillColor(24, 24, 27) // Dark background for header
+      doc.rect(0, 0, 210, 40, 'F')
+      
+      doc.setTextColor(255, 255, 255)
+      doc.setFontSize(24)
+      doc.setFont("helvetica", "bold")
+      doc.text("PLUTO - ACTIVATION GUIDE", 105, 25, { align: "center" })
+      
+      doc.setTextColor(0, 0, 0)
+      doc.setFontSize(14)
+      doc.text("Organization Name:", 20, 55)
+      doc.setFont("helvetica", "normal")
+      doc.text(org.name, 70, 55)
+      
+      doc.setFont("helvetica", "bold")
+      doc.text("Admin Email:", 20, 65)
+      doc.setFont("helvetica", "normal")
+      doc.text(org.admin_email, 70, 65)
+      
+      doc.setFont("helvetica", "bold")
+      doc.text("Organization Code:", 20, 75)
+      doc.setFont("helvetica", "normal")
+      doc.text(org.code, 70, 75)
+      
+      doc.setFont("helvetica", "bold")
+      doc.text("License Key:", 20, 85)
+      doc.setFont("helvetica", "normal")
+      doc.setFontSize(12)
+      doc.text(licenseKey, 70, 85)
+      
+      doc.setDrawColor(228, 228, 231)
+      doc.line(20, 95, 190, 95)
+      
+      doc.setFont("helvetica", "bold")
+      doc.setFontSize(16)
+      doc.text("How to Activate Your Instance", 20, 110)
+      
+      doc.setFont("helvetica", "normal")
+      doc.setFontSize(11)
+      const instructions = [
+        "1. Open your main Pluto project application.",
+        "2. On the initial startup or setup screen, you will be prompted for license verification.",
+        `3. Enter your administrator email address: ${org.admin_email}`,
+        `4. Enter your Organization Name exactly as: ${org.name.toUpperCase()} (ALL CAPS REQUIRED)`,
+        `5. Enter your Organization Code: ${org.code}`,
+        `6. Paste your unique License Key: ${licenseKey}`,
+        "7. Provide a unique Server ID for this installation (e.g., prod-server-01).",
+        "8. Click 'Verify License' to activate your instance and link it to the admin console."
+      ]
+      
+      let yPos = 125
+      instructions.forEach(line => {
+        const splitText = doc.splitTextToSize(line, 170)
+        doc.text(splitText, 20, yPos)
+        yPos += (splitText.length * 7)
+      })
+      
+      doc.setFont("helvetica", "italic")
+      doc.setFontSize(10)
+      doc.setTextColor(100, 100, 100)
+      doc.text("Note: This document contains sensitive security keys. Keep it confidential.", 105, 280, { align: "center" })
+      
+      // Save the PDF
+      doc.save(`Pluto_Activation_${org.name.replace(/\s+/g, '_')}.pdf`)
+      
+      // Log the download
+      await logAdminAction(
+        'DOWNLOAD_ACTIVATION_GUIDE',
+        `Downloaded activation guide for ${org.name}`,
+        org.id,
+        user?.primaryEmailAddress?.emailAddress || user?.id || 'Unknown Admin'
+      )
+      
+    } catch (error: any) {
+      console.error('Error generating activation guide:', error)
+      alert('Error: ' + error.message)
+    }
+  }
 
   const generateLicenseKey = () => {
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -305,6 +404,13 @@ export default function OrganizationsPage() {
                     <td className="px-6 py-4 font-medium">{org.plan}</td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-2 text-zinc-400">
+                         <button 
+                           onClick={() => handleDownloadActivationGuide(org)}
+                           className="p-2 hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 rounded-lg transition" 
+                           title="Download Activation Guide"
+                         >
+                           <Download className="h-4 w-4" />
+                         </button>
                          <Link href={`/organizations/${org.id}`} className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition" title="View Details">
                            <ExternalLink className="h-4 w-4" />
                          </Link>

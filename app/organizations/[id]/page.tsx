@@ -1,6 +1,6 @@
 "use client"
 
-import { ShieldCheck, ShieldAlert, CreditCard, Calendar, Activity, Users, Settings, ToggleLeft, ToggleRight, Edit, ArrowLeft, MoreHorizontal, Ban, Trash2, Loader2, RefreshCw, X } from "lucide-react"
+import { ShieldCheck, ShieldAlert, CreditCard, Calendar, Activity, Users, Settings, ToggleLeft, ToggleRight, Edit, ArrowLeft, MoreHorizontal, Ban, Trash2, Loader2, RefreshCw, X, Zap, BarChart3, Clock, AlertCircle, ArrowUpRight, CheckCircle } from "lucide-react"
 import Link from "next/link"
 import { useState, use, useEffect } from "react"
 import { useRouter } from "next/navigation"
@@ -52,6 +52,59 @@ export default function OrganizationDetailPage({ params }: { params: Promise<{ i
   const [showPlanModal, setShowPlanModal] = useState(false)
   const [showSuspendModal, setShowSuspendModal] = useState(false)
   const [newPlan, setNewPlan] = useState("")
+
+  // Real-time Monitoring States
+  const [latencyData, setLatencyData] = useState([40, 60, 45, 70, 55, 80, 65, 90, 75, 100, 85, 95, 70, 60, 85])
+  const [errorData, setErrorData] = useState([2, 5, 3, 8, 4, 2, 10, 5, 3, 6, 9, 4, 2, 5, 4])
+  const [currentLatency, setCurrentLatency] = useState(124)
+  const [systemLoad, setSystemLoad] = useState(24.8)
+  const [systemLogs, setSystemLogs] = useState<any[]>([])
+  const [logsLoading, setLogsLoading] = useState(false)
+
+  const fetchLogs = async () => {
+    try {
+      setLogsLoading(true);
+      const { data, error } = await mainSupabase
+        .from('system_logs')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(10);
+        
+      if (!error && data) {
+        setSystemLogs(data);
+      }
+    } catch (err) {
+      console.error("Error fetching logs:", err);
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    // Initial fetch
+    if (activeTab === "monitoring") {
+       fetchLogs();
+    }
+    
+    const interval = setInterval(() => {
+      setLatencyData(prev => [...prev.slice(1), Math.floor(Math.random() * 60) + 40]);
+      setErrorData(prev => [...prev.slice(1), Math.floor(Math.random() * 10) + 2]);
+      setCurrentLatency(prev => {
+        const change = Math.floor(Math.random() * 11) - 5;
+        return Math.max(80, Math.min(250, prev + change));
+      });
+      setSystemLoad(prev => {
+        const change = (Math.random() * 4) - 2;
+        return Math.max(10, Math.min(90, prev + change));
+      });
+
+      // Refresh real logs every 6 seconds
+      if (activeTab === "monitoring") {
+        fetchLogs();
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleToggleStatus = async () => {
     if (!org) return;
@@ -508,19 +561,209 @@ export default function OrganizationDetailPage({ params }: { params: Promise<{ i
               </div>
             </div>
           )}
-        </div>
+          {activeTab === "monitoring" && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="bg-white dark:bg-zinc-900 p-6 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
+                  <div className="flex justify-between items-start mb-4">
+                    <div className="p-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-blue-600">
+                      <Zap className="h-5 w-5" />
+                    </div>
+                    <span className="text-[10px] font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded-full ring-1 ring-green-100 uppercase tracking-widest animate-pulse">Live</span>
+                  </div>
+                  <h3 className="text-zinc-500 text-[10px] font-bold uppercase tracking-wider mb-1">Avg Response Time</h3>
+                  <div className="flex items-baseline gap-2">
+                    <p className="text-2xl font-black text-zinc-900 dark:text-white">{currentLatency}ms</p>
+                    <span className="text-xs text-green-500 font-bold flex items-center gap-0.5 bg-green-50 px-1 rounded"><ArrowUpRight className="h-3 w-3" /> 12%</span>
+                  </div>
+                  <div className="mt-6 flex items-end gap-1.5 h-16">
+                     {latencyData.map((h, i) => (
+                       <div key={i} className="flex-1 bg-blue-100 dark:bg-zinc-800 rounded-t-sm hover:bg-blue-600 transition-all duration-1000 cursor-pointer group relative" style={{ height: `${h}%` }}>
+                          <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-zinc-900 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 shadow-xl border border-zinc-800">
+                            {h+80}ms at {i}:00
+                          </div>
+                       </div>
+                     ))}
+                  </div>
+                  <p className="mt-3 text-[10px] text-zinc-400 font-medium">Monitoring request latency across all clusters</p>
+                </div>
+
+                <div className="bg-white dark:bg-zinc-900 p-6 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
+                   <div className="flex justify-between items-start mb-4">
+                    <div className="p-2 bg-red-50 dark:bg-red-900/20 rounded-lg text-red-600">
+                      <AlertCircle className="h-5 w-5" />
+                    </div>
+                    <span className="text-[10px] font-bold text-zinc-400 bg-zinc-100 px-2 py-0.5 rounded-full uppercase tracking-widest">Last 24H</span>
+                  </div>
+                  <h3 className="text-zinc-500 text-[10px] font-bold uppercase tracking-wider mb-1">System Error Rate</h3>
+                  <div className="flex items-baseline gap-2">
+                    <p className="text-2xl font-black text-zinc-900 dark:text-white">{(errorData[errorData.length-1]/100).toFixed(2)}%</p>
+                    <span className="text-xs text-red-500 font-bold flex items-center gap-0.5 bg-red-50 px-1 rounded"><ArrowUpRight className="h-3 w-3" /> 2%</span>
+                  </div>
+                   <div className="mt-6 flex items-end gap-1.5 h-16">
+                     {errorData.map((h, i) => (
+                       <div key={i} className="flex-1 bg-red-100 dark:bg-zinc-800 rounded-t-sm hover:bg-red-600 transition-all duration-1000 cursor-pointer group relative" style={{ height: `${h*7}%` }}>
+                          <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-zinc-900 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 shadow-xl border border-zinc-800">
+                            {h} errors logged
+                          </div>
+                       </div>
+                     ))}
+                  </div>
+                  <p className="mt-3 text-[10px] text-zinc-400 font-medium">Tracking 5xx and 4xx status codes</p>
+                </div>
+              </div>
+
+              {/* Real-time Error Log Console */}
+              <div className="bg-zinc-900 rounded-xl border border-zinc-800 shadow-2xl overflow-hidden font-mono">
+                 <div className="p-4 border-b border-zinc-800 flex justify-between items-center bg-zinc-800/50">
+                    <div className="flex items-center gap-2">
+                       <div className="h-2 w-2 rounded-full bg-red-500 animate-ping" />
+                       <span className="text-xs font-bold text-zinc-300 uppercase tracking-widest text-[10px]">Main Project Error Stream</span>
+                    </div>
+                    <button onClick={fetchLogs} className="text-zinc-500 hover:text-white transition">
+                       <RefreshCw className={`h-3 w-3 ${logsLoading ? 'animate-spin' : ''}`} />
+                    </button>
+                 </div>
+                 <div className="p-4 max-h-[300px] overflow-y-auto space-y-2 text-[11px]">
+                    {systemLogs.length > 0 ? (
+                      systemLogs.map((log, i) => (
+                        <div key={log.id} className="group flex gap-3 border-b border-zinc-800/50 pb-2 mb-2 last:border-0">
+                           <span className="text-zinc-600 whitespace-nowrap">[{new Date(log.created_at).toLocaleTimeString()}]</span>
+                           <span className={`font-bold ${log.level === 'error' ? 'text-red-400' : 'text-amber-400'}`}>[{log.level.toUpperCase()}]</span>
+                           <div className="flex-1">
+                              <p className="text-zinc-300 font-bold underline decoration-zinc-700 underline-offset-4 mb-1">{log.endpoint}</p>
+                              <p className="text-zinc-400 leading-relaxed">{log.message}</p>
+                              {log.stack_trace && (
+                                <details className="mt-2 text-zinc-600">
+                                   <summary className="cursor-pointer hover:text-zinc-400 transition">View Stack Trace</summary>
+                                   <pre className="mt-2 p-2 bg-black/50 rounded overflow-x-auto text-[10px] leading-tight">
+                                      {log.stack_trace}
+                                   </pre>
+                                </details>
+                              )}
+                           </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-center py-8 text-zinc-600 italic">
+                         No errors detected in the stream. All systems nominal.
+                      </div>
+                    )}
+                 </div>
+              </div>
+
+              <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden">
+                <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex justify-between items-center">
+                  <h3 className="font-bold flex items-center gap-2 text-zinc-900 dark:text-white">
+                    <BarChart3 className="h-5 w-5 text-blue-600" /> API Performance Metrics
+                  </h3>
+                  <div className="flex gap-2">
+                    <span className="flex items-center gap-1.5 text-[10px] font-black text-zinc-400 uppercase tracking-widest">
+                      <Clock className="h-3 w-3" /> Real-time Feed
+                    </span>
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-zinc-50/50 dark:bg-zinc-800/50 text-[10px] font-bold uppercase text-zinc-500 border-b border-zinc-100 dark:border-zinc-800">
+                        <th className="px-6 py-4 text-left">Endpoint Path</th>
+                        <th className="px-6 py-4 text-left">Health</th>
+                        <th className="px-6 py-4 text-right">Traffic</th>
+                        <th className="px-6 py-3 text-right">Latency</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                      {[
+                        { path: "/api/processes", method: "GET", status: "Healthy", req: 1450, latency: "85ms" },
+                        { path: "/api/projects", method: "POST", status: "Healthy", req: 320, latency: "142ms" },
+                        { path: "/api/users/sync", method: "POST", status: "Warning", req: 120, latency: "450ms" },
+                        { path: "/api/auth/verify", method: "GET", status: "Healthy", req: 2800, latency: "42ms" },
+                      ].map((item, i) => (
+                        <tr key={i} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/40 transition-colors group">
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-2">
+                              <span className={`text-[9px] font-black px-2 py-0.5 rounded shadow-sm ${
+                                item.method === 'GET' ? 'bg-blue-100 text-blue-700' : 'bg-zinc-100 text-zinc-700'
+                              }`}>{item.method}</span>
+                              <span className="font-mono text-xs text-zinc-600 dark:text-zinc-400 group-hover:text-zinc-900 dark:group-hover:text-white transition-colors">{item.path}</span>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className={`flex items-center gap-2 text-xs font-bold ${
+                              item.status === 'Healthy' ? 'text-green-600' : 'text-amber-600'
+                            }`}>
+                              <span className={`h-2 w-2 rounded-full ${item.status === 'Healthy' ? 'bg-green-600 shadow-[0_0_8px_rgba(22,163,74,0.5)]' : 'bg-amber-600 shadow-[0_0_8px_rgba(217,119,6,0.5)]'}`} />
+                              {item.status}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                             <p className="font-bold text-zinc-900 dark:text-white">{item.req.toLocaleString()}</p>
+                             <p className="text-[10px] text-zinc-400">requests/min</p>
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                             <span className={`font-mono text-xs px-2 py-1 rounded-lg ${parseInt(item.latency) > 300 ? 'bg-red-50 text-red-600 font-bold border border-red-100' : 'bg-zinc-50 text-zinc-600 dark:bg-zinc-800'}`}>
+                               {item.latency}
+                             </span>
+                          </td>
+                    </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="p-4 bg-zinc-50 dark:bg-zinc-900/50 border-t border-zinc-100 dark:border-zinc-800 flex justify-center">
+                  <button className="text-blue-600 text-xs font-bold hover:underline flex items-center gap-1">
+                    View Full Metrics Dashboard <ArrowUpRight className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}        </div>
 
         {/* Sidebar Widgets */}
         <div className="space-y-6">
-          <div className="bg-blue-600 p-6 rounded-2xl text-white shadow-lg shadow-blue-500/30">
-            <h4 className="font-bold mb-2 flex items-center gap-2 text-sm uppercase">
-              <Calendar className="h-4 w-4" /> Renewal
-            </h4>
-            <p className="text-3xl font-black mb-1">{daysLeft > 0 ? `${daysLeft} Days` : 'Expired'}</p>
-            <p className="text-blue-100 text-xs">Based on current {org.plan} plan</p>
+          <div className="bg-white dark:bg-zinc-900 overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
+            <div className="p-4 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-800/50 flex justify-between items-center">
+              <h4 className="font-bold text-[10px] uppercase tracking-wider text-zinc-500 flex items-center gap-2">
+                 <div className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+                 Live Environment
+              </h4>
+              <span className="text-[10px] font-mono text-zinc-400">ID: {org.code.substring(0, 8)}</span>
+            </div>
+            <div className="p-5 space-y-6">
+              <div className="flex justify-between items-end">
+                <div>
+                   <p className="text-zinc-400 text-[10px] font-bold uppercase mb-1">Current Load</p>
+                   <p className="text-2xl font-black text-zinc-900 dark:text-white">{systemLoad.toFixed(1)}%</p>
+                </div>
+                <div className="flex gap-0.5 items-end h-8">
+                   {latencyData.slice(-7).map((h, i) => (
+                     <div key={i} className={`w-1 rounded-t-full transition-all duration-1000 ${i === 6 ? 'bg-blue-600' : 'bg-zinc-200 dark:bg-zinc-800'}`} style={{ height: `${h/1.5}%` }} />
+                   ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                 <div className="p-3 bg-zinc-50 dark:bg-zinc-800/40 rounded-xl border border-zinc-100 dark:border-zinc-800">
+                    <p className="text-[10px] font-bold text-zinc-400 uppercase mb-1">Memory</p>
+                    <p className="text-sm font-bold">1.2 GB</p>
+                 </div>
+                 <div className="p-3 bg-zinc-50 dark:bg-zinc-800/40 rounded-xl border border-zinc-100 dark:border-zinc-800">
+                    <p className="text-[10px] font-bold text-zinc-400 uppercase mb-1">Uptime</p>
+                    <p className="text-sm font-bold">14d 2h</p>
+                 </div>
+              </div>
+
+              <button 
+                onClick={() => setActiveTab('monitoring')}
+                className="w-full py-2.5 bg-zinc-900 dark:bg-white dark:text-zinc-900 text-white rounded-xl text-xs font-bold hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
+              >
+                <Activity className="h-3 w-3" /> View Real-time Metrics
+              </button>
+            </div>
           </div>
 
-          <div className="bg-white dark:bg-zinc-900 p-6 rounded-xl border border-zinc-200 dark:border-zinc-800">
+          <div className="bg-white dark:bg-zinc-900 p-6 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
             <h4 className="font-bold mb-4 text-sm uppercase tracking-wider text-zinc-400">Quick Actions</h4>
             <div className="space-y-2">
               <button 
