@@ -119,7 +119,7 @@ export default function HealthPage() {
                     </div>
                     <div className="flex items-center gap-3 mt-1">
                       <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-black flex items-center gap-1">
-                        <div className={`h-1.5 w-1.5 rounded-full ${inst.status === 'operational' ? 'bg-green-500' : 'bg-red-500'}`} />
+                        <span className={`h-1.5 w-1.5 rounded-full ${inst.status === 'operational' ? 'bg-green-500' : 'bg-red-500'}`} />
                         {inst.status}
                       </p>
                       <span className="text-[10px] text-zinc-400 font-medium">• Last pulse: {new Date(inst.last_heartbeat).toLocaleTimeString()}</span>
