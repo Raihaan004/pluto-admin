@@ -44,9 +44,7 @@ export async function createClerkOrganization(name: string, adminEmail: string) 
 
 export async function deleteClerkOrganization(organizationId: string) {
   try {
-    await clerkClient.organizations.deleteOrganization({
-      organizationId: organizationId,
-    })
+    await clerkClient.organizations.deleteOrganization(organizationId)
     return { success: true }
   } catch (error: any) {
     console.error("Error deleting Clerk organization:", error)

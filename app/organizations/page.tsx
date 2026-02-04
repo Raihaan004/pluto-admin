@@ -9,6 +9,7 @@ import { createClerkOrganization, deleteClerkOrganization } from "@/app/actions/
 import { logAdminAction } from "@/lib/logger"
 import { useUser } from "@clerk/nextjs"
 import { jsPDF } from "jspdf"
+import { toast } from "sonner"
 
 interface Organization {
   id: number
@@ -152,7 +153,7 @@ export default function OrganizationsPage() {
       
     } catch (error: any) {
       console.error('Error generating activation guide:', error)
-      alert('Error: ' + error.message)
+      toast.error('Error: ' + error.message)
     }
   }
 
@@ -229,14 +230,14 @@ export default function OrganizationsPage() {
         user?.primaryEmailAddress?.emailAddress || user?.id || 'Unknown Admin'
       )
 
-      alert(`Organization Onboarded Successfully!\n\nOrg Code: ${orgCode}\nLicense Key: ${licenseKey}`)
+      toast.success("Organization Onboarded Successfully!");
       setShowCreateModal(false)
       setStep(1)
       setFormData({ name: "", adminEmail: "", plan: "Pro", duration: "12" })
       fetchOrganizations()
     } catch (error: any) {
       console.error('Error onboarding organization:', error)
-      alert('Error: ' + error.message)
+      toast.error('Error: ' + error.message)
     } finally {
       setIsSubmitting(false)
     }
@@ -317,11 +318,11 @@ export default function OrganizationsPage() {
         user?.primaryEmailAddress?.emailAddress || user?.id || 'Unknown Admin'
       )
 
-      alert("Organization deleted successfully")
+      toast.success("Organization deleted successfully")
       fetchOrganizations()
     } catch (error: any) {
       console.error("Error deleting organization:", error)
-      alert("Error: " + error.message)
+      toast.error("Error: " + error.message)
     } finally {
       setLoading(false)
     }
